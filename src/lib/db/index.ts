@@ -1,6 +1,11 @@
 
 import { PrismaClient } from '@/generated/prisma/client'
 import { makeAdapter } from '@/lib/db/adapter'
+import { assertDatabaseConfig } from '@/lib/env'
+
+// Throws a readable config error on Vercel if DATABASE_URL is missing or not
+// Postgres, instead of letting queries fail against an ephemeral SQLite file.
+assertDatabaseConfig()
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
 

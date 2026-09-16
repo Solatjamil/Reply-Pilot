@@ -167,6 +167,30 @@ export function configuredPlatforms() {
   ]
 }
 
+/**
+ * Fails fast when a serverless target (Vercel) is running without a Postgres
+ * DATABASE_URL. Without this check the getter fallback `file:./dev.db` wins
+ * silently and the deploy queries an empty ephemeral SQLite file, surfacing
+ * as the baffling runtime error "The table `main.User` does not exist"
+ * ("main" being SQLite's schema). A loud config error at boot is better than
+ * a 500 on every route.
+ */
+export function assertDatabaseConfig(): void {
+  const serverless = process.env.VERCEL === '1' || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME)
+  if (!serverless) return
+  const url = env.databaseUrl
+  if (/^postgres(ql)?:\/\//i.test(url)) return
+  const raw = process.env.DATABASE_URL?.trim()
+  const shown = raw ? `"${raw.replace(/\/\/[^@/]+@/, '//***@')}"` : 'not set at all'
+  throw new Error(
+    `ReplyPilot config error: on Vercel, DATABASE_URL must be a postgresql:// connection string, but it is ${shown}. ` +
+      `SQLite files do not survive on serverless filesystems. Fix: Vercel dashboard → Storage → Create → Neon ` +
+      `(free Postgres; sets DATABASE_URL for you), or paste any postgresql:// URL into Project Settings → ` +
+      `Environment Variables, then Redeploy. Set DB_PUSH_AT_BUILD=1 once so the first build creates the tables. ` +
+      `See docs/DEPLOYING.md.`
+  )
+}
+
 export function aiConfigured(): boolean {
   if (process.env.AI_MOCK === '1') return true
   switch (env.ai.provider) {

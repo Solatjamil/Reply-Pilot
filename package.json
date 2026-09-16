@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/sync-provider.mjs && next dev",
-    "build": "node scripts/sync-provider.mjs && prisma generate && next build",
+    "build": "node scripts/sync-provider.mjs && prisma generate && node scripts/db-push-if-enabled.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "worker": "tsx worker.ts",
@@ -13,7 +13,7 @@
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "build:webpack": "node scripts/sync-provider.mjs && prisma generate && next build --webpack",
+    "build:webpack": "node scripts/sync-provider.mjs && prisma generate && node scripts/db-push-if-enabled.mjs && next build --webpack",
     "test": "tsx --tsconfig tsconfig.json --test tests/*.test.ts"
   },
   "dependencies": {

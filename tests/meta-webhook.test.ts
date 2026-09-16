@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHmac } from 'node:crypto'
 import { metaAdapter } from '../src/lib/platforms/adapters/meta'
 
 const parse = (payload: unknown) => metaAdapter.parseWebhook!(JSON.stringify(payload), new Headers())
@@ -158,10 +159,9 @@ test('empty and malformed payloads are ignored, not thrown', () => {
 })
 
 test('webhook signature verification rejects tampering', () => {
-  const crypto = require('node:crypto') as typeof import('node:crypto')
   const body = '{"object":"page","entry":[]}'
   const secret = 'test-secret-value-32-chars-long!!'
-  const good = `sha256=${crypto.createHmac('sha256', secret).update(body).digest('hex')}`
+  const good = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`
 
   // env.meta.appSecret is a live getter over process.env, so setting it here
   // is enough — no adapter re-instantiation needed.

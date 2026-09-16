@@ -57,13 +57,30 @@ DATABASE_URL="postgresql://user:pass@host/db?sslmode=require"
 emits SQL in the dialect named in the schema, so generating a SQLite client and running it
 against Postgres fails at runtime.
 
-Create the tables and seed the admin user from your own machine — not at build time, since
-Vercel discards the build container's filesystem:
+If `DATABASE_URL` is missing or not Postgres, the app now refuses to boot on Vercel and
+throws a config error pointing at this section — instead of silently falling back to
+`file:./dev.db` and 500-ing on an empty ephemeral SQLite file (the tell-tale symptom is
+`The table 'main.User' does not exist`; `main` is SQLite's schema).
+
+Creating the tables, two ways:
+
+**No local machine (opt-in push at build time).** Set `DB_PUSH_AT_BUILD=1` next to
+`DATABASE_URL` and redeploy. `npm run build` then runs `prisma db push` between `generate`
+and `next build`, so the first deploy provisions the whole schema. It is idempotent, and it
+never passes `--accept-data-loss`, so destructive drift fails the build instead of dropping
+rows. When the connection string goes through a pooler (Neon's Vercel integration exposes
+`POSTGRES_URL_NON_POOLING`), the push automatically prefers the non-pooled URL. You can
+unset the flag once you are stable, or leave it on to apply schema changes on every deploy.
+
+**From your own machine**, if you prefer explicit control:
 
 ```bash
 DATABASE_URL="postgresql://…" npm run db:push
-DATABASE_URL="postgresql://…" SEED_DEMO=0 npm run db:seed
 ```
+
+Seeding is optional either way: on an empty database the first sign-in attempt
+self-provisions the bootstrap admin (see the env table below), and the **Create workspace**
+tab on `/login` is fully self-serve.
 
 ### 2. There is no background worker
 
@@ -106,7 +123,8 @@ Preview if you use it):
 | `AUTH_SECRET` | ≥32 random chars. Signs session JWTs |
 | `APP_URL` | `https://your-app.vercel.app` — must be the real HTTPS URL or OAuth redirects and webhook URLs will be wrong |
 | `CRON_SECRET` | Protects `/api/jobs/run` |
-| `BOOTSTRAP_*` | Only needed if you seed from Vercel; normally you seed locally |
+| `DB_PUSH_AT_BUILD` | `1` = first build creates the tables (section 1). Unset afterwards if you prefer pushing manually |
+| `BOOTSTRAP_EMAIL` / `BOOTSTRAP_PASSWORD` | On an **empty** database the first sign-in attempt creates this admin. Unset, it defaults to `admin@replypilot.local` / `replypilot123` — set your own email and a real password *before* anyone loads `/login`, or skip bootstrap entirely and use the **Create workspace** tab |
 
 Then the AI provider and per-platform credentials you actually use — see the README table and
 **Settings → Platform credentials** in the running app.
@@ -139,12 +157,15 @@ look for it. Nothing is set by default, so a plain Vercel deploy works.
 
 ### After deploying
 
-1. Visit `/settings` — it is a live checklist. It confirms the AI provider, the database
+1. Sign in at `/login`. On an empty database the first attempt creates the bootstrap admin
+   from `BOOTSTRAP_EMAIL` / `BOOTSTRAP_PASSWORD`; the **Create workspace** tab instead lets
+   you register any email and a fresh workspace.
+2. Visit `/settings` — it is a live checklist. It confirms the AI provider, the database
    provider, whether `APP_URL` is public, and which platform credentials are still missing.
-2. Copy each webhook URL from **Settings → Webhooks** into the matching developer console and
+3. Copy each webhook URL from **Settings → Webhooks** into the matching developer console and
    subscribe to the listed fields.
-3. **Accounts → Attach a new profile** to run the OAuth flow.
-4. Turn `AI_MOCK` off once a real provider key is in place.
+4. **Accounts → Attach a new profile** to run the OAuth flow.
+5. Turn `AI_MOCK` off once a real provider key is in place.
 
 ---
 
