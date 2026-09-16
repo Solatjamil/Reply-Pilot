@@ -1,0 +1,434 @@
+// ReplyPilot schema
+// ---------------------------------------------------------------------------
+// PROVIDER NOTE: defaults to sqlite so the app runs anywhere with zero setup.
+// For production switch the provider below to "postgresql" and point
+// DATABASE_URL at Postgres (see docker-compose.yml). `npm run setup` re-pushes
+// the schema automatically.
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ─────────────────────────────── Identity ───────────────────────────────
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  name         String?
+  passwordHash String
+  role         String       @default("owner") // owner | admin | agent
+  createdAt    DateTime     @default(now())
+  memberships  Membership[]
+}
+
+model Workspace {
+  id            String           @id @default(cuid())
+  name          String
+  slug          String           @unique
+  settings      String           @default("{}") // JSON
+  createdAt     DateTime         @default(now())
+  memberships   Membership[]
+  accounts      Account[]
+  automations   AutomationConfig[]
+  safetyRules   SafetyRule[]
+  knowledge     KnowledgeItem[]
+  brandVoices   BrandVoice[]
+  contents      Content[]
+  comments      Comment[]
+  threads       Thread[]
+  messages      Message[]
+  drafts        Draft[]
+  jobs          Job[]
+  eventLogs     EventLog[]
+  usageStats    UsageStat[]
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        String    @default("admin")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+// ─────────────────────── Connected social profiles ──────────────────────
+
+model Account {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  platform     String // facebook_page | instagram | messenger | tiktok | youtube | linkedin_org | linkedin_person | x
+  platformUid  String // native id (page id, ig id, channel id, org urn, x user id)
+  handle       String? // @username / vanity name
+  name         String
+  avatarUrl    String?
+  profileUrl   String?
+
+  // OAuth material — ALL secrets are encrypted at rest with AES-256-GCM.
+  accessToken  String?
+  refreshToken String?
+  idToken      String?
+  expiresAt    DateTime?
+  scope        String?
+  rawTokens    String? // encrypted JSON blob from the provider
+  // Platform extras (Meta page tokens live on the page account; X needs 1.0a
+  // consumer keys for Account Activity webhooks; YouTube may use an API key.)
+  secrets      String? // encrypted JSON
+
+  capabilities String   @default("{}") // JSON PlatformCapabilities
+  regionCode   String? // e.g. TikTok registration country (gates messaging)
+  status       String   @default("active") // active | error | revoked | pending_access
+  lastSyncAt   DateTime?
+  lastError    String?
+  errorSince   DateTime?
+  connectedAt  DateTime @default(now())
+
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automation  AutomationConfig?
+  safetyRules SafetyRule[]
+  contents    Content[]
+  comments    Comment[]
+  threads     Thread[]
+  messages    Message[]
+  drafts      Draft[]
+  jobs        Job[]
+  eventLogs   EventLog[]
+  usageStats  UsageStat[]
+
+  @@unique([workspaceId, platform, platformUid])
+  @@index([workspaceId, status])
+}
+
+model AutomationConfig {
+  id                 String  @id @default(cuid())
+  workspaceId        String
+  accountId          String  @unique
+
+  replyToComments    Boolean @default(true)
+  replyToDms         Boolean @default(true)
+  replyToMentions    Boolean @default(true)
+
+  // The hybrid human-in-the-loop model:
+  //  confidence >= autoSendThreshold  -> sent automatically
+  //  reviewThreshold <= c < autoSend  -> queued for one-click approval
+  //  c < reviewThreshold or flagged   -> escalated to a human, no draft sent
+  autoSendEnabled    Boolean @default(true)
+  autoSendThreshold  Float   @default(0.82)
+  reviewThreshold    Float   @default(0.55)
+
+  // Humanisation / anti-spam guards
+  minDelaySeconds    Int     @default(20)
+  maxDelaySeconds    Int     @default(180)
+  maxAutoPerHour     Int     @default(25)
+  maxAutoPerDay      Int     @default(400)
+  maxRepliesPerUser  Int     @default(2) // per thread / per commenter per post
+  skipOwnComments    Boolean @default(true)
+  skipRepliesToUs    Boolean @default(true) // don't re-answer someone we answered
+  skipLowEffort      Boolean @default(true) // emoji-only, "nice", single char
+  quietHoursEnabled  Boolean @default(false)
+  quietHoursStart    String  @default("22:00")
+  quietHoursEnd      String  @default("08:00")
+  timezone           String  @default("UTC")
+  language           String  @default("auto") // auto = match commenter language
+  brandVoiceId       String?
+  sentiment          String  @default("warm_professional")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model SafetyRule {
+  id          String  @id @default(cuid())
+  workspaceId String
+  accountId   String?
+  kind        String // blocklist | escalate_keyword | guaranteed_answer | competitor | profanity
+  pattern     String // keyword, phrase or regex
+  matchType   String  @default("contains") // contains | exact | regex | whole_word
+  response    String? // canned answer for guaranteed_answer rules
+  priority    Int     @default(100)
+  enabled     Boolean @default(true)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   Account?  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, kind])
+}
+
+model KnowledgeItem {
+  id           String  @id @default(cuid())
+  workspaceId  String
+  kind         String  @default("faq") // faq | policy | product | url | doc
+  question     String?
+  title        String
+  body         String
+  tags         String  @default("[]")
+  url          String?
+  weight       Int     @default(1)
+  enabled      Boolean @default(true)
+  embedding    String? // JSON float array
+  embedModel   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, enabled])
+}
+
+model BrandVoice {
+  id          String  @id @default(cuid())
+  workspaceId String
+  name        String  @default("Default")
+  persona     String // long-form description injected into the prompt
+  tone        String  @default("friendly, concise, helpful")
+  language    String  @default("auto")
+  emojiPolicy String  @default("sparingly") // none | sparingly | freely
+  signOff     String?
+  bannedWords String  @default("[]")
+  mustInclude String  @default("[]")
+  maxChars    Int     @default(300)
+  examples    String  @default("[]") // JSON [{comment, reply}] few-shot pairs
+  isDefault   Boolean @default(true)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+// ─────────────────────────── Ingested content ───────────────────────────
+
+model Content {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  accountId    String
+  platformUid  String // native post/video id
+  type         String   @default("post") // post | video | reel | story | live
+  text         String?
+  url          String?
+  thumbnailUrl String?
+  publishedAt  DateTime?
+  metrics      String   @default("{}")
+  lastCheckedAt DateTime?
+  lastCursor   String? // polling cursor per platform
+  createdAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  comments  Comment[]
+
+  @@unique([accountId, platformUid])
+  @@index([workspaceId, publishedAt])
+}
+
+model Comment {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  accountId    String
+  contentId    String?
+  platformUid  String // native comment id
+  parentId     String? // native parent comment id (threaded reply)
+  authorId     String?
+  authorName   String?
+  authorHandle String?
+  authorAvatar String?
+  text         String
+  permalink    String?
+  platform     String
+  createdAt    DateTime
+  detectedLang String?
+  sentiment    String?
+  intent       String?
+  isOwnComment Boolean  @default(false)
+  isAnswered   Boolean  @default(false)
+  hidden       Boolean  @default(false)
+  raw          String? // encrypted/JSON native payload
+  ingestedAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  content   Content?  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  drafts    Draft[]
+  messages  Message[]
+
+  @@unique([accountId, platformUid])
+  @@index([workspaceId, createdAt])
+  @@index([accountId, isAnswered])
+}
+
+model Thread {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  accountId      String
+  platformUid    String // native conversation id (or derived key)
+  participantId  String?
+  participantName String?
+  participantHandle String?
+  participantAvatar String?
+  lastMessageAt  DateTime?
+  open           Boolean  @default(true)
+  handedToHuman  Boolean  @default(false)
+  firstInboundAt DateTime?
+  createdAt      DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  messages  Message[]
+  drafts    Draft[]
+
+  @@unique([accountId, platformUid])
+  @@index([workspaceId, lastMessageAt])
+}
+
+model Message {
+  id          String   @id @default(cuid())
+  workspaceId String
+  accountId   String
+  threadId    String
+  commentId   String? // set when this DM came from a private reply / comment trigger
+  platformUid String?
+  direction   String // inbound | outbound
+  text        String
+  attachments String   @default("[]")
+  senderName  String?
+  senderId    String?
+  isFromApi   Boolean  @default(false)
+  isEcho      Boolean  @default(false)
+  createdAt   DateTime
+  raw         String?
+  ingestedAt  DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  thread    Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  comment   Comment?  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  drafts    Draft[]
+
+  @@unique([accountId, platformUid, direction])
+  @@index([threadId, createdAt])
+  @@index([workspaceId, createdAt])
+}
+
+// ─────────────────────────── AI reply drafts ────────────────────────────
+
+model Draft {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  accountId    String
+  kind         String // comment_reply | dm_reply | private_reply
+  commentId    String?
+  messageId    String?
+  threadId     String?
+
+  text         String
+  alternates   String   @default("[]") // JSON array of other candidate replies
+  confidence   Float    @default(0)
+  intent       String? // question | praise | complaint | purchase_intent | spam | other
+  sentiment    String?
+  language     String?
+  reasoning    String? // why the model is/isn't confident
+  action       String   @default("review") // auto_send | review | escalate | ignore
+  status       String   @default("pending") // pending | scheduled | approved | sending | sent | failed | rejected | edited | ignored
+  flaggedFor   String   @default("[]") // JSON list of safety reasons
+  knowledgeIds String   @default("[]") // JSON list of KnowledgeItem ids used
+  llmProvider  String?
+  llmModel     String?
+  promptTokens Int?
+  outputTokens Int?
+  costUsd      Float?
+  scheduledFor DateTime?
+  decidedBy    String?
+  decidedAt    DateTime?
+  sentAt       DateTime?
+  platformReplyId String?
+  error        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  comment   Comment?  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  message   Message?  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  thread    Thread?   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([accountId, status, scheduledFor])
+  @@index([status, scheduledFor])
+}
+
+// ─────────────────────────────── Jobs ───────────────────────────────────
+
+model Job {
+  id         String    @id @default(cuid())
+  workspaceId String?
+  accountId  String?
+  type       String // poll_content | poll_comments | poll_messages | generate_draft | send_draft | refresh_token | embed_knowledge | sync_account
+  payload    String    @default("{}")
+  key        String? // dedupe key
+  status     String    @default("queued") // queued | running | done | failed | cancelled
+  priority   Int       @default(0)
+  attempts   Int       @default(0)
+  maxAttempts Int      @default(5)
+  runAt      DateTime  @default(now())
+  lockedAt   DateTime?
+  lockedBy   String?
+  lastError  String?
+  result     String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   Account?   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([type, key])
+  @@index([status, runAt])
+  @@index([accountId, type])
+}
+
+model EventLog {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  accountId   String?
+  type        String // webhook.received | reply.sent | reply.failed | oauth.connected | llm.call | safety.blocked ...
+  level       String   @default("info") // debug | info | warn | error
+  message     String
+  data        String   @default("{}")
+  createdAt   DateTime @default(now())
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   Account?   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([type, createdAt])
+}
+
+model UsageStat {
+  id          String   @id @default(cuid())
+  workspaceId String
+  accountId   String
+  day         String // YYYY-MM-DD
+  inboundComments Int  @default(0)
+  inboundMessages Int  @default(0)
+  autoSent    Int      @default(0)
+  approved    Int      @default(0)
+  rejected    Int      @default(0)
+  escalated   Int      @default(0)
+  failed      Int      @default(0)
+  llmCalls    Int      @default(0)
+  costUsd     Float    @default(0)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, day])
+  @@index([workspaceId, day])
+}

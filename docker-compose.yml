@@ -1,0 +1,64 @@
+# ReplyPilot — Postgres + web + worker
+#
+#   cp .env.example .env   # then edit: APP_SECRET, AUTH_SECRET, DATABASE_URL,
+#                          # APP_URL and at least one AI provider key
+#   docker compose up -d --build
+#
+# The web container runs with ENABLE_INPROC_WORKER=0 so a deploy/restart never
+# drops an in-flight send. The worker container owns the queue.
+#
+# Scaling: `docker compose up -d --scale worker=3` — jobs are claimed with a
+# SKIP-LOCKED style update, so extra workers are safe. For very high volume,
+# swap src/lib/jobs/queue.ts for pg-boss (same Job table semantics, plus
+# cron-style schedules, retries with backoff and a monitoring UI).
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-replypilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replypilot}
+      POSTGRES_DB: ${POSTGRES_DB:-replypilot}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-replypilot} -d ${POSTGRES_DB:-replypilot}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - '127.0.0.1:5432:5432'
+
+  web:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-replypilot}:${POSTGRES_PASSWORD:-replypilot}@db:5432/${POSTGRES_DB:-replypilot}
+      ENABLE_INPROC_WORKER: '0'
+      NODE_ENV: production
+      # Production containers seed the workspace + admin, not the demo inbox.
+      SEED_DEMO: '0'
+    ports:
+      - '3000:3000'
+    command: sh -c 'node scripts/db-push.mjs && npx tsx prisma/seed.ts && node server.js'
+
+  worker:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-replypilot}:${POSTGRES_PASSWORD:-replypilot}@db:5432/${POSTGRES_DB:-replypilot}
+      ENABLE_INPROC_WORKER: '1'
+      NODE_ENV: production
+    command: npx tsx worker.ts
+
+volumes:
+  db-data:

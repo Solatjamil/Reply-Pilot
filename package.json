@@ -1,0 +1,44 @@
+{
+  "name": "replypilot",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "worker": "tsx worker.ts",
+    "setup": "node scripts/setup.mjs",
+    "db:push": "node scripts/db-push.mjs",
+    "db:generate": "prisma generate",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "build:webpack": "prisma generate && next build --webpack",
+    "test": "tsx --tsconfig tsconfig.json --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-better-sqlite3": "^7.10.0",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "jose": "^6.2.12",
+    "next": "16.3.4",
+    "pg": "^8.23.0",
+    "prisma": "^7.10.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tsx": "^4.23.13",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
