@@ -2,10 +2,13 @@ import { NextResponse } from 'next/server'
 import { logEvent } from '@/lib/log'
 import { enqueue } from '@/lib/jobs/queue'
 import { sha256 } from '@/lib/crypto'
+import { drainAfterResponse } from '@/lib/serverless'
 import { xAdapter } from '@/lib/platforms/adapters/x'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+// Room for the ACK plus the post-response queue drain on serverless.
+export const maxDuration = 30
 
 /**
  * X (Twitter) Account Activity API webhook.
@@ -51,6 +54,10 @@ export async function POST(req: Request) {
     maxAttempts: 3,
   })
   await logEvent({ type: 'webhook.received', level: 'debug', message: 'X Account Activity webhook received' })
+
+  // Serverless has no background worker, so drain the job we just enqueued
+  // once the ACK has been sent.
+  drainAfterResponse()
 
   return NextResponse.json({ ok: true })
 }

@@ -2,10 +2,13 @@ import { NextResponse } from 'next/server'
 import { logEvent } from '@/lib/log'
 import { enqueue } from '@/lib/jobs/queue'
 import { sha256 } from '@/lib/crypto'
+import { drainAfterResponse } from '@/lib/serverless'
 import { metaAdapter } from '@/lib/platforms/adapters/meta'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+// Room for the ACK plus the post-response queue drain on serverless.
+export const maxDuration = 30
 
 /**
  * Meta webhook endpoint — handles Facebook Pages, Instagram comments/mentions
@@ -53,5 +56,9 @@ export async function POST(req: Request) {
   }
 
   // Always 200 quickly — Meta retries aggressively and eventually unsubscribes.
+  // Serverless has no background worker, so drain the job we just enqueued
+  // once the ACK has been sent.
+  drainAfterResponse()
+
   return NextResponse.json({ ok: true })
 }

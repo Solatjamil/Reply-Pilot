@@ -120,7 +120,7 @@ export function startWorker(opts: WorkerOptions = {}) {
 }
 
 /** Drains the queue once and exits — useful for cron / serverless deployments. */
-export async function drainQueue(opts: { maxSeconds?: number } = {}) {
+export async function drainQueue(opts: { maxSeconds?: number; stopWhenIdle?: boolean } = {}) {
   const maxMs = (opts.maxSeconds ?? 30) * 1000
   const deadline = Date.now() + maxMs
   let processed = 0
@@ -132,6 +132,10 @@ export async function drainQueue(opts: { maxSeconds?: number } = {}) {
   while (Date.now() < deadline) {
     const job = await claimJob(id)
     if (!job) {
+      // A long-lived worker idles and keeps polling. A serverless invocation
+      // must return as soon as the queue is empty instead of spinning until the
+      // deadline and burning invocation time.
+      if (opts.stopWhenIdle) break
       await new Promise((r) => setTimeout(r, 500))
       continue
     }

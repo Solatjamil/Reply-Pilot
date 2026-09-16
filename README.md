@@ -180,9 +180,17 @@ This is the part most demos skip. Each platform gates automated replies differen
 
 ## Deploying
 
+Full instructions, including Vercel/serverless specifics, are in **[`docs/DEPLOYING.md`](docs/DEPLOYING.md)**.
+
 ```bash
 docker compose up -d --build     # Postgres + web + worker (seeds without demo data)
 ```
+
+**On Vercel?** It works, but three things must be true: `DATABASE_URL` must be Postgres (the
+filesystem is ephemeral, so SQLite cannot work), `NEXT_STANDALONE` must stay unset (it breaks
+Vercel's builder), and there is no persistent worker — webhook-driven platforms stay
+near-realtime via post-response draining, but platforms that only support polling (YouTube,
+LinkedIn, TikTok) need Vercel Pro or an external scheduler. See the deploy guide.
 
 or manually:
 
@@ -228,4 +236,5 @@ src/lib/platforms/adapters/ one adapter per platform (OAuth, read, send, webhook
 src/lib/worker/             queue runner + job handlers
 src/lib/                    auth, crypto, db, env, http (rate-limited fetch)
 docs/API_REFERENCE.md       platform API map, endpoints, env vars
+docs/DEPLOYING.md           Docker / VPS / Vercel deployment guides
 ```

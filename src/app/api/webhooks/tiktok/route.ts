@@ -2,10 +2,13 @@ import { NextResponse } from 'next/server'
 import { logEvent } from '@/lib/log'
 import { enqueue } from '@/lib/jobs/queue'
 import { sha256 } from '@/lib/crypto'
+import { drainAfterResponse } from '@/lib/serverless'
 import { tiktokAdapter } from '@/lib/platforms/adapters/tiktok'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+// Room for the ACK plus the post-response queue drain on serverless.
+export const maxDuration = 30
 
 /** TikTok Business Messaging webhook (partner-gated). */
 export async function GET(req: Request) {
@@ -31,6 +34,10 @@ export async function POST(req: Request) {
     priority: 30,
     maxAttempts: 3,
   })
+
+  // Serverless has no background worker, so drain the job we just enqueued
+  // once the ACK has been sent.
+  drainAfterResponse()
 
   return NextResponse.json({ ok: true })
 }

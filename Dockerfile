@@ -15,15 +15,18 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Prisma needs a datasource URL at generate time; the runtime value is what
 # actually matters (src/lib/db/adapter.ts reads DATABASE_URL on boot).
+# `npm run build` runs scripts/sync-provider.mjs, which switches the schema's
+# provider to postgresql from this URL — containers always run on Postgres.
 ENV DATABASE_URL="postgresql://replypilot:replypilot@db:5432/replypilot"
 ENV NEXT_TELEMETRY_DISABLED=1
-# schema.prisma ships with provider="sqlite" for zero-setup local dev; pin it
-# to postgres for the container build.
-RUN node -e "const fs=require('fs');const p='prisma/schema.prisma';fs.writeFileSync(p,fs.readFileSync(p,'utf8').replace(/(datasource db \{\s*provider = \")\w+(\")/, '\$1postgresql\$2'))"
+# next.config.ts only emits the standalone bundle when this is set — Vercel and
+# other non-container builds must leave it unset, or the deploy fails looking
+# for .next/next-server.js.nft.json.
+ENV NEXT_STANDALONE=1
 # --webpack: the default Turbopack build needs more RAM than a small CI box has.
 # Use `npm run build` here instead if your builder has 4 GB+ free.
 ENV NODE_OPTIONS=--max-old-space-size=1536
-RUN npx prisma generate && npm run build:webpack
+RUN npm run build:webpack
 
 FROM node:20-alpine AS runner
 WORKDIR /app

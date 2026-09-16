@@ -7,6 +7,12 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
 
+  // Serverless functions are frozen between requests, so a polling loop here
+  // would never reliably fire and would burn invocation time trying. On Vercel
+  // the queue is drained inline after each webhook (see src/lib/serverless.ts)
+  // and by the cron jobs in vercel.json.
+  if (process.env.VERCEL) return
+
   // Avoid double-starting under Turbopack/Webpack HMR reloads.
   const flag = globalThis as unknown as { __replypilotInstrumented?: boolean }
   if (flag.__replypilotInstrumented) return
